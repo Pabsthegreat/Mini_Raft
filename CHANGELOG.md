@@ -2,6 +2,13 @@
 
 All notable changes to the Mini-RAFT project will be documented in this file.
 
+## [2026-03-15] - Integration Tests and Docker Failover Script
+### Added
+- In-process integration tests (7 tests) covering: leader election, stroke replication, leader crash + re-election, writes after failover, follower catch-up via /sync-log, write rejection with leader hint, stale leader demotion
+- Docker failover test script (`scripts/test-failover.sh`) for manual/demo verification
+### Fixed
+- `requestCatchUp` no longer returns early when leader responds with a higher term (follower now updates term AND applies entries)
+
 ## [2026-03-15] - RAFT Replica Cluster with Docker
 ### Added
 - Mini-RAFT consensus protocol implementation (Node.js + TypeScript + Express)

@@ -203,7 +203,7 @@ replica/
 cd replica
 npm install
 npm run dev    # Development server with watch mode
-npm test       # Run all tests (68 tests across 5 suites)
+npm test       # Run all tests (75 tests across 6 suites including integration)
 npm run build  # TypeScript compilation
 ```
 
@@ -268,4 +268,7 @@ docker compose start replica1
 
 # 6. Verify it caught up
 curl http://localhost:3001/status
+
+# Automated failover test
+./scripts/test-failover.sh
 ```

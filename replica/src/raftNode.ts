@@ -477,7 +477,6 @@ export class RaftNode {
 
         if (result.term > this.currentTerm) {
           this.becomeFollower(result.term);
-          return;
         }
 
         for (const entry of result.entries) {
