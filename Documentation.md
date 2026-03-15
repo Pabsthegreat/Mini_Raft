@@ -65,3 +65,57 @@ npm run dev    # Development server at http://localhost:5173
 npm test       # Run all tests
 npm run build  # Production build
 ```
+
+---
+
+## WebSocket Gateway Server
+
+### What it does
+
+A Node.js + TypeScript WebSocket gateway that accepts client connections, manages in-memory board state, tracks connected users per board, and broadcasts strokes between clients in real time. Boards are created lazily on first join and persist strokes in memory for reconnecting users.
+
+### How it works
+
+- **Tech stack**: Node.js, TypeScript, `ws` library, Vitest
+- **WebSocket endpoint**: `ws://localhost:8080/ws?boardId=<code>&userId=<uuid>`
+- **Board management**: Boards are stored in a `Map<string, Board>` keyed by board ID. Each board holds an array of strokes and a map of connected users (userId → WebSocket).
+- **Connection lifecycle**: On connect, `boardId` and `userId` are extracted from query params. On `join` message, the user is registered and receives a `join_ack` with all existing strokes. On disconnect, a `user_left` message is broadcast to remaining users.
+- **Stroke relay**: Incoming strokes are stored in the board's stroke array and broadcast to all other users on the board (not echoed to the sender, since the frontend uses optimistic rendering).
+- **RAFT preparation**: A `RaftClient` interface abstracts stroke storage. Currently implemented as `LocalRaftClient` (in-memory via BoardManager). Will be swapped for `RemoteRaftClient` when RAFT replicas are added.
+
+### Broadcasting Rules
+
+| Message | Recipients |
+|---------|-----------|
+| `join_ack` | Only the joining user |
+| `user_joined` | All on board EXCEPT the joiner |
+| `stroke_broadcast` | All on board EXCEPT the stroke author |
+| `user_left` | All remaining users on board |
+| `error` | Only the offending client |
+
+### Architecture
+
+```
+gateway/
+├── src/
+│   ├── index.ts            # HTTP server + WS server on port 8080
+│   ├── types.ts             # Shared message protocol types
+│   ├── boardManager.ts      # Board state, user registry, broadcast helper
+│   ├── messageHandler.ts    # JSON parse, dispatch to board manager
+│   ├── wsServer.ts          # WebSocket server setup, connection lifecycle
+│   └── raftClient.ts        # RAFT interface + LocalRaftClient (no-op for now)
+```
+
+### Configuration
+
+- **Port**: Set `PORT` environment variable (default: `8080`)
+
+### Running
+
+```bash
+cd gateway
+npm install
+npm run dev    # Development server on port 8080
+npm test       # Run all tests (29 tests across 4 suites)
+npm run build  # TypeScript compilation
+```
