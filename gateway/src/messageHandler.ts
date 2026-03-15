@@ -35,8 +35,10 @@ export class MessageHandler {
     }
   }
 
-  private handleJoin(ws: WebSocket, boardId: string, userId: string): void {
-    const strokes = this.boardManager.joinBoard(boardId, userId, ws);
+  private async handleJoin(ws: WebSocket, boardId: string, userId: string): Promise<void> {
+    this.boardManager.joinBoard(boardId, userId, ws);
+
+    const strokes = await this.raftClient.getStrokes(boardId);
 
     this.boardManager.sendTo(ws, {
       type: 'join_ack',

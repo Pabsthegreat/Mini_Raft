@@ -2,6 +2,27 @@
 
 All notable changes to the Mini-RAFT project will be documented in this file.
 
+## [2026-03-15] - RAFT Replica Cluster with Docker
+### Added
+- Mini-RAFT consensus protocol implementation (Node.js + TypeScript + Express)
+- `RaftNode` state machine: leader election, log replication, heartbeats, commit advancement
+- `RaftLog` append-only log with 1-based indexing, truncation, and range queries
+- `DefaultTimerManager` with randomized election timeout (500-800ms) and heartbeat interval (150ms)
+- `HttpRpcClient` for peer-to-peer HTTP RPCs with timeout handling
+- Express route handlers for `/request-vote`, `/append-entries`, `/heartbeat`, `/sync-log`, `/client-write`
+- Query endpoints: `GET /health`, `GET /status`, `GET /board-state`
+- Board state derived from committed log entries (in-memory `Map<boardId, Stroke[]>`)
+- Follower catch-up via `/sync-log` for restarted nodes
+- Stale leader demotion on higher term discovery
+- Client write flow: leader appends, replicates to majority, commits, then acknowledges
+- `RemoteRaftClient` in gateway: forwards strokes to RAFT leader, follows leader hints on redirect
+- Gateway auto-detects `RAFT_PEERS` env var to switch between local and remote RAFT client
+- Dockerfiles for gateway and replica
+- `docker-compose.yml` with 1 gateway + 3 replicas on shared bridge network
+- Structured JSON logging for elections, terms, commits, retries, catch-up, leader transitions
+- 68 replica tests across 5 suites + 34 gateway tests across 5 suites (102 total)
+- `test-replica` job added to CI pipeline
+
 ## [2026-03-15] - WebSocket Gateway Server
 ### Added
 - Node.js + TypeScript WebSocket gateway server on port 8080

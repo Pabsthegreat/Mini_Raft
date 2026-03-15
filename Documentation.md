@@ -81,7 +81,7 @@ A Node.js + TypeScript WebSocket gateway that accepts client connections, manage
 - **Board management**: Boards are stored in a `Map<string, Board>` keyed by board ID. Each board holds an array of strokes and a map of connected users (userId → WebSocket).
 - **Connection lifecycle**: On connect, `boardId` and `userId` are extracted from query params. On `join` message, the user is registered and receives a `join_ack` with all existing strokes. On disconnect, a `user_left` message is broadcast to remaining users.
 - **Stroke relay**: Incoming strokes are stored in the board's stroke array and broadcast to all other users on the board (not echoed to the sender, since the frontend uses optimistic rendering).
-- **RAFT preparation**: A `RaftClient` interface abstracts stroke storage. Currently implemented as `LocalRaftClient` (in-memory via BoardManager). Will be swapped for `RemoteRaftClient` when RAFT replicas are added.
+- **RAFT integration**: A `RaftClient` interface abstracts stroke storage. `LocalRaftClient` stores in-memory (no Docker). `RemoteRaftClient` forwards to the RAFT leader via HTTP when `RAFT_PEERS` env var is set. The gateway auto-detects which client to use.
 
 ### Broadcasting Rules
 
@@ -103,12 +103,14 @@ gateway/
 │   ├── boardManager.ts      # Board state, user registry, broadcast helper
 │   ├── messageHandler.ts    # JSON parse, dispatch to board manager
 │   ├── wsServer.ts          # WebSocket server setup, connection lifecycle
-│   └── raftClient.ts        # RAFT interface + LocalRaftClient (no-op for now)
+│   ├── raftClient.ts        # RaftClient interface + LocalRaftClient
+│   └── remoteRaftClient.ts  # RemoteRaftClient for RAFT cluster integration
 ```
 
 ### Configuration
 
 - **Port**: Set `PORT` environment variable (default: `8080`)
+- **RAFT_PEERS**: Comma-separated replica URLs (e.g., `http://replica1:3001,http://replica2:3002,http://replica3:3003`). When set, gateway forwards strokes to RAFT leader instead of storing locally.
 
 ### Running
 
@@ -116,6 +118,154 @@ gateway/
 cd gateway
 npm install
 npm run dev    # Development server on port 8080
-npm test       # Run all tests (29 tests across 4 suites)
+npm test       # Run all tests (34 tests across 5 suites)
 npm run build  # TypeScript compilation
+```
+
+---
+
+## RAFT Replica Cluster
+
+### What it does
+
+Three replica nodes implementing a simplified Mini-RAFT consensus protocol. Replicas maintain a shared append-only stroke log, elect a leader, replicate entries, and commit only on majority acknowledgment. The gateway forwards incoming drawing strokes to the active leader, and only committed strokes are broadcast to clients.
+
+### How it works
+
+- **Tech stack**: Node.js, TypeScript, Express, Vitest
+- **Consensus**: Mini-RAFT with leader election, log replication, and majority-based commit
+- **Node states**: Follower, Candidate, Leader
+- **Heartbeat interval**: 150ms from leader to all followers
+- **Election timeout**: Randomized 500-800ms; if a follower misses heartbeats, it becomes a candidate
+- **Majority**: 2 of 3 nodes (cluster tolerates 1 failure)
+- **Log entries**: Each entry contains an index, term, and stroke. Entries are committed only when replicated to a majority.
+- **Board state**: Derived from committed log entries. Each replica maintains an in-memory `Map<boardId, Stroke[]>` for fast reads.
+- **Catch-up**: Restarted nodes use `/sync-log` to fetch missing committed entries from the leader.
+
+### RAFT State Machine
+
+Each replica maintains:
+- `currentTerm` — monotonically increasing term number
+- `votedFor` — candidate voted for in current term (at most one per term)
+- `state` — follower | candidate | leader
+- `leaderId` — known leader for client redirection
+- `log` — append-only array of `LogEntry` (index, term, stroke)
+- `commitIndex` — highest committed log index
+- `lastApplied` — highest log index applied to board state
+- `nextIndex` / `matchIndex` — leader-only, per-follower replication tracking
+
+### Election Rules
+
+1. Follower times out (500-800ms randomized) → becomes candidate
+2. Candidate increments term, votes for self, sends `RequestVote` to peers
+3. Node becomes leader only on receiving majority votes (2 of 3)
+4. Higher term always wins — any node seeing a higher term steps down to follower
+5. A node votes at most once per term
+6. Vote granted only if candidate's log is at least as up-to-date as voter's
+
+### Replica API Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/request-vote` | RequestVote RPC |
+| POST | `/append-entries` | AppendEntries RPC (log replication) |
+| POST | `/heartbeat` | Leader heartbeat |
+| POST | `/sync-log` | Follower catch-up after restart |
+| POST | `/client-write` | Gateway submits stroke to leader |
+| GET | `/health` | Health check |
+| GET | `/status` | Replica state (term, leader, log length, etc.) |
+| GET | `/board-state?boardId=X` | Committed strokes for a board |
+
+### Architecture
+
+```
+replica/
+├── src/
+│   ├── index.ts            # Express server, env config, wiring
+│   ├── types.ts            # RAFT types, RPC payloads, interfaces
+│   ├── raftNode.ts         # Core RAFT state machine
+│   ├── raftLog.ts          # Append-only log data structure
+│   ├── electionTimer.ts    # Randomized election timeout + heartbeat scheduler
+│   ├── rpcClient.ts        # HTTP client for peer RPCs
+│   ├── rpcHandlers.ts      # Express route handlers for all endpoints
+│   └── logger.ts           # Structured JSON logger
+```
+
+### Configuration
+
+- **REPLICA_ID**: Unique replica identifier (e.g., `replica1`)
+- **PORT**: HTTP port (default: `3001`)
+- **PEERS**: Comma-separated peer URLs (e.g., `http://replica2:3002,http://replica3:3003`)
+
+### Running
+
+```bash
+cd replica
+npm install
+npm run dev    # Development server with watch mode
+npm test       # Run all tests (68 tests across 5 suites)
+npm run build  # TypeScript compilation
+```
+
+---
+
+## Docker Setup
+
+### What it does
+
+Docker Compose orchestrates the full system: 1 gateway + 3 RAFT replicas on a shared bridge network. Each replica runs from the same image with different environment variables.
+
+### Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| `gateway` | 8080 | WebSocket gateway (exposed to host) |
+| `replica1` | 3001 | RAFT replica node 1 |
+| `replica2` | 3002 | RAFT replica node 2 |
+| `replica3` | 3003 | RAFT replica node 3 |
+
+### Running
+
+```bash
+# Start everything
+docker compose up --build
+
+# Start in background
+docker compose up --build -d
+
+# View logs
+docker compose logs -f
+
+# Stop
+docker compose down
+
+# Restart a single replica (simulates crash/recovery)
+docker compose restart replica1
+
+# Kill leader to test failover
+docker compose stop replica1
+```
+
+### Testing Failover
+
+```bash
+# 1. Start cluster
+docker compose up --build -d
+
+# 2. Check who is leader
+curl http://localhost:3001/status
+curl http://localhost:3002/status
+curl http://localhost:3003/status
+
+# 3. Kill the leader (e.g., replica1)
+docker compose stop replica1
+
+# 4. Wait ~1s for election, check new leader
+curl http://localhost:3002/status
+
+# 5. Restart crashed replica (catches up via /sync-log)
+docker compose start replica1
+
+# 6. Verify it caught up
+curl http://localhost:3001/status
 ```

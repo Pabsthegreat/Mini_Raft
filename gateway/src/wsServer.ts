@@ -5,6 +5,7 @@ import type { Server } from 'http';
 import { BoardManager } from './boardManager.js';
 import { MessageHandler } from './messageHandler.js';
 import { LocalRaftClient } from './raftClient.js';
+import { RemoteRaftClient } from './remoteRaftClient.js';
 
 export interface ConnectionInfo {
   boardId: string;
@@ -13,7 +14,18 @@ export interface ConnectionInfo {
 
 export function createWsServer(server: Server) {
   const boardManager = new BoardManager();
-  const raftClient = new LocalRaftClient(boardManager);
+
+  const raftPeers = process.env.RAFT_PEERS;
+  const raftClient = raftPeers
+    ? new RemoteRaftClient(raftPeers.split(',').map((p) => p.trim()))
+    : new LocalRaftClient(boardManager);
+
+  if (raftPeers) {
+    console.log(`[gateway] Using RemoteRaftClient with peers: ${raftPeers}`);
+  } else {
+    console.log('[gateway] Using LocalRaftClient (no RAFT_PEERS set)');
+  }
+
   const messageHandler = new MessageHandler(boardManager, raftClient);
   const connections = new Map<WebSocket, ConnectionInfo>();
 
