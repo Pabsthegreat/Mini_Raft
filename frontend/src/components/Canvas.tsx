@@ -61,24 +61,38 @@ export function Canvas({ boardId, userId, color, strokes, onStrokeComplete }: Ca
   }, [strokes]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      data-testid="drawing-canvas"
-      width={CANVAS_WIDTH}
-      height={CANVAS_HEIGHT}
-      style={{
-        width: '100%',
-        maxWidth: `${CANVAS_WIDTH}px`,
-        aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`,
-        border: '1px solid #ccc',
-        cursor: 'crosshair',
-        touchAction: 'none',
-        display: 'block',
-      }}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerLeave={handlePointerUp}
-    />
+    <section className="canvas-panel" aria-label="Drawing surface">
+      <div className="canvas-header">
+        <div>
+          <h2 className="canvas-title">Shared canvas</h2>
+          <p className="canvas-copy">Use the palette on the left, then draw directly on the board.</p>
+        </div>
+        <span className="canvas-badge">Stroke mode</span>
+      </div>
+
+      <div className="canvas-frame">
+        <canvas
+          ref={canvasRef}
+          className="drawing-canvas"
+          data-testid="drawing-canvas"
+          width={CANVAS_WIDTH}
+          height={CANVAS_HEIGHT}
+          style={{
+            maxWidth: `${CANVAS_WIDTH}px`,
+            cursor: 'crosshair',
+          }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerUp}
+        />
+      </div>
+
+      <div className="canvas-footer">
+        <span>Board {boardId}</span>
+        <span>User {userId.slice(0, 8)}</span>
+        <span>Color {color}</span>
+      </div>
+    </section>
   );
 }
